@@ -57,7 +57,7 @@ class WatchConnectivityGarmin extends WatchConnectivityBase {
       case 'didReceiveMessage':
         final myArg = call.arguments as String;
         final message = {'data': myArg};
-        messageStreamController.add(message);
+        addMessageToStream(message);
         break;
       default:
       // Optionally call super's handler logic, if you refactor it to be protected or public
@@ -66,6 +66,7 @@ class WatchConnectivityGarmin extends WatchConnectivityBase {
   }
 
   /// Send a message to all connected watches
+  @override
   Future<void> sendMessage(Map<String, dynamic> message) {
     return channel.invokeMethod('sendMessage', message);
   }

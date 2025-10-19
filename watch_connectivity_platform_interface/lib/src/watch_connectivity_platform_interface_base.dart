@@ -51,6 +51,18 @@ abstract class WatchConnectivityBase {
     }
   }
 
+  /// Add a message to the message stream
+  /// This is a helper method for platform implementations
+  void addMessageToStream(Map<String, dynamic> message) {
+    messageStreamController.add(message);
+  }
+
+  /// Add a context to the context stream
+  /// This is a helper method for platform implementations
+  void addContextToStream(Map<String, dynamic> context) {
+    contextStreamController.add(context);
+  }
+
   /// If watches are supported by the current platform
   Future<bool> get isSupported async {
     final supported = await channel.invokeMethod<bool>('isSupported');
