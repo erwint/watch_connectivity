@@ -2,10 +2,13 @@ package dev.rexios.watch_connectivity_garmin
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.util.Log
 import com.garmin.android.connectiq.ConnectIQ
 import com.garmin.android.connectiq.ConnectIQ.ConnectIQListener
 import com.garmin.android.connectiq.ConnectIQ.IQApplicationInfoListener
 import com.garmin.android.connectiq.ConnectIQ.IQConnectType
+import com.garmin.android.connectiq.ConnectIQ.IQOpenApplicationListener
+import com.garmin.android.connectiq.ConnectIQ.IQOpenApplicationStatus
 import com.garmin.android.connectiq.ConnectIQ.IQSdkErrorStatus
 import com.garmin.android.connectiq.IQApp
 import com.garmin.android.connectiq.IQDevice
@@ -29,6 +32,10 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var packageManager: PackageManager
     private lateinit var connectIQ: ConnectIQ
     private lateinit var iqApp: IQApp
+
+    companion object {
+        private const val TAG = "WatchConnectivityGarmin"
+    }
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "watch_connectivity_garmin")
@@ -54,6 +61,7 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
             // Methods
             "initialize" -> initialize(call, result)
             "sendMessage" -> sendMessage(call, result)
+            "openApplication" -> openApplication(result)
 
             // Not implemented
             else -> result.notImplemented()
@@ -185,6 +193,93 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
             } else {
                 result.success(null)
             }
+        }
+    }
+
+    private fun openApplication(result: Result) {
+        try {
+            // Verify SDK is actually ready by checking if we can get devices
+            val devices: List<IQDevice>?
+            try {
+                devices = connectIQ.knownDevices
+            } catch (e: Exception) {
+                Log.w(TAG, "SDK not ready, can't get devices yet: ${e.message}")
+                result.error("SDK_NOT_READY", "ConnectIQ SDK is still initializing", null)
+                return
+            }
+
+            if (devices == null || devices.isEmpty()) {
+                Log.w(TAG, "No known devices")
+                result.error("NO_DEVICE", "No connected device found", null)
+                return
+            }
+
+            // Log all available devices
+            Log.d(TAG, "Found ${devices.size} known device(s):")
+            devices.forEachIndexed { index, d ->
+                Log.d(TAG, "  [$index] ${d.friendlyName} (${d.deviceIdentifier}) - status: ${d.status}")
+            }
+
+            // Find best device with priority:
+            // 1. CONNECTED status (best)
+            // 2. NOT_CONNECTED status
+            // 3. Fall back to first device
+            val device = devices.firstOrNull {
+                it.status == IQDevice.IQDeviceStatus.CONNECTED
+            } ?: devices.firstOrNull {
+                it.status == IQDevice.IQDeviceStatus.NOT_CONNECTED
+            } ?: devices[0]
+
+            Log.d(TAG, "Selected device: ${device.friendlyName} (${device.deviceIdentifier})")
+            Log.d(TAG, "Device status: ${device.status}")
+            Log.d(TAG, "Attempting to open app ${iqApp.applicationId} on this device")
+
+            // Call openApplication
+            try {
+                connectIQ.openApplication(
+                    device,
+                    iqApp,
+                    object : IQOpenApplicationListener {
+                        override fun onOpenApplicationResponse(
+                            device: IQDevice,
+                            app: IQApp,
+                            status: IQOpenApplicationStatus
+                        ) {
+                            Log.d(TAG, "openApplication callback received! status: $status")
+
+                            when (status) {
+                                IQOpenApplicationStatus.APP_IS_ALREADY_RUNNING -> {
+                                    Log.d(TAG, "App is already running")
+                                    result.success(true)
+                                }
+                                IQOpenApplicationStatus.PROMPT_SHOWN_ON_DEVICE -> {
+                                    Log.d(TAG, "Prompt shown on device")
+                                    result.success(true)
+                                }
+                                IQOpenApplicationStatus.PROMPT_NOT_SHOWN_ON_DEVICE -> {
+                                    Log.w(TAG, "Prompt not shown on device")
+                                    result.success(false)
+                                }
+                                IQOpenApplicationStatus.APP_IS_NOT_INSTALLED -> {
+                                    Log.w(TAG, "App not installed on device (expected in simulator)")
+                                    result.success(false)
+                                }
+                                else -> {
+                                    Log.w(TAG, "Unknown openApplication status: $status")
+                                    result.success(false)
+                                }
+                            }
+                        }
+                    }
+                )
+                Log.d(TAG, "openApplication() call completed (waiting for callback...)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception calling openApplication: ${e.message}", e)
+                result.error("OPEN_APP_EXCEPTION", e.message, null)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error opening watch app", e)
+            result.error("OPEN_APP_ERROR", e.message, null)
         }
     }
 }
